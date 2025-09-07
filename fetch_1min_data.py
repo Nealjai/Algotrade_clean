@@ -3,8 +3,9 @@ import time
 from ib_async import IB
 from ib_async.contract import Stock
 import asyncio
-
-
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+tz = ZoneInfo("Asia/Hong_Kong")
 #======================BELOW IS Async VERSION, use command line to control========================
 
 # Fucntions that fetches data for a single symbol
@@ -12,50 +13,74 @@ import asyncio
 async def fetch_data(ib: IB, symbol: str):
     print(f"== Requesting data for {symbol} ==")
 
-    #Starts a timer to measure how long fetching takes.
     start = time.perf_counter() 
+
+    start_date = datetime(2025, 9, 1, 21, 30, 0, tzinfo=tz)
+    end_date = datetime(2025, 9, 5, 7, 0, 0, tzinfo=tz)
+    current_end = end_date
+
+    all_bars = []
 
     try:
         contract = Stock(symbol, "SMART", "USD")
-
-        # --- define all API parameters up front!
-        endDateTime = ""
-        durationStr = "1 D"
         barSizeSetting = "1 min"
         whatToShow = "TRADES"
         useRTH = True
 
-        # Print the parameters to catch typos
-        print(
-            f"Requesting bars with parameters: "
-            f"contract.symbol={contract.symbol}, "
-            f"endDateTime='{endDateTime}', durationStr='{durationStr}', "
-            f"barSizeSetting='{barSizeSetting}', whatToShow='{whatToShow}', useRTH={useRTH}"
-        )
-        
-        bars = await ib.reqHistoricalDataAsync(
-            contract,
-            endDateTime=endDateTime,
-            durationStr=durationStr,
-            barSizeSetting=barSizeSetting,
-            whatToShow=whatToShow,
-            useRTH=useRTH
-        )
-        
-        print(f"Type of bars: {type(bars)}")
-        print(f"Length of bars: {len(bars)}")
-        print(f"bars: {bars[:1]}")  # Show first 3 items for a preview
+        while current_end > start_date:
+            # Always request 1 D, but clamp to start_date if less than 1 day left
+            chunk_start = max(current_end - timedelta(days=1), start_date)
+            duration_str = "1 D"
+            endDateTime = current_end.strftime("%Y%m%d %H:%M:%S")
 
-        print(f"=== Received {symbol} Bars ===")
-        if not bars:
-            print(f"No bars received for {symbol}!")
-        else:
-            for bar in bars[:15]:
-                print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
+            print(
+                f"\nRequesting chunk: {duration_str} ending at {endDateTime} "
+                f"(from {chunk_start} to {current_end})"
+            )
+
+            bars = await ib.reqHistoricalDataAsync(
+                contract,
+                endDateTime=endDateTime,
+                durationStr=duration_str,
+                barSizeSetting=barSizeSetting,
+                whatToShow=whatToShow,
+                useRTH=useRTH
+            )
+
+            # Filter bars to within the window you actually want
+            filtered_bars = [
+                bar for bar in bars
+                if chunk_start <= bar.date < current_end
+            ]
+
+            if not filtered_bars:
+                print("  No bars received for this chunk!")
+            else:
+                print(f"  Received {len(filtered_bars)} bars.")
+                all_bars = filtered_bars + all_bars
+
+            current_end = chunk_start  # Move window back
+
+        print(f"\n=== DONE! Total bars collected for {symbol}: {len(all_bars)} ===")
+        print("\nFirst 5 bars:")
+        for bar in all_bars[:5]:
+            print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
+
+        print("\nLast 5 bars:")
+        for bar in all_bars[-5:]:
+            print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
+
     except Exception as e:
         print(f"Error fetching {symbol}: {e}")
+
     end = time.perf_counter()
-    print(f"Finished fetching {symbol} in {end - start} seconds")
+    print(f"Finished fetching {symbol} in {end - start:.2f} seconds\n")
+
+
+
+
+
+
 
 
 
