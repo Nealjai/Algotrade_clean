@@ -5,7 +5,10 @@ from ib_async.contract import Stock
 import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-tz = ZoneInfo("Asia/Hong_Kong")
+import pandas as pd
+
+
+tz = ZoneInfo("America/New_York") #Convert to US timezone
 #======================BELOW IS Async VERSION, use command line to control========================
 
 # Fucntions that fetches data for a single symbol
@@ -15,8 +18,8 @@ async def fetch_data(ib: IB, symbol: str):
 
     start = time.perf_counter() 
 
-    start_date = datetime(2025, 9, 1, 21, 30, 0, tzinfo=tz)
-    end_date = datetime(2025, 9, 5, 7, 0, 0, tzinfo=tz)
+    start_date = datetime(2025, 9, 1, 9, 30, 0, tzinfo=tz)
+    end_date = datetime(2025, 9, 4, 18, 00, 0, tzinfo=tz)
     current_end = end_date
 
     all_bars = []
@@ -26,11 +29,13 @@ async def fetch_data(ib: IB, symbol: str):
         barSizeSetting = "1 min"
         whatToShow = "TRADES"
         useRTH = True
-
+        
+        window_days = 1
+        
         while current_end > start_date:
             # Always request 1 D, but clamp to start_date if less than 1 day left
-            chunk_start = max(current_end - timedelta(days=1), start_date)
-            duration_str = "1 D"
+            chunk_start = max(current_end - timedelta(days=window_days), start_date)
+            duration_str = f"{window_days} D"
             endDateTime = current_end.strftime("%Y%m%d %H:%M:%S")
 
             print(
@@ -56,32 +61,48 @@ async def fetch_data(ib: IB, symbol: str):
             if not filtered_bars:
                 print("  No bars received for this chunk!")
             else:
-                print(f"  Received {len(filtered_bars)} bars.")
+                print(f"Before: {len(all_bars)} bars")
                 all_bars = filtered_bars + all_bars
+                print(f"After: {len(all_bars)} bars")
 
             current_end = chunk_start  # Move window back
 
         print(f"\n=== DONE! Total bars collected for {symbol}: {len(all_bars)} ===")
-        print("\nFirst 5 bars:")
-        for bar in all_bars[:5]:
+        print("\nFirst 2 bars:")
+        for bar in all_bars[:2]:
             print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
 
-        print("\nLast 5 bars:")
-        for bar in all_bars[-5:]:
+        print("\nLast 2 bars:")
+        for bar in all_bars[-2:]:
             print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
+            
+        # print(f"TYPE OF all_bars: {all_bars[1]}")
+        """
+        Output of 1 bar:
+        TYPE OF all_bars: BarData(date=datetime.datetime(2025, 9, 2, 9, 31, tzinfo=zoneinfo.ZoneInfo(key='US/Eastern')), open=84.59, high=84.59, low=84.25, close=84.44, volume=894442.0, average=84.412, barCount=2976)
+        """
+
+        
+        # Put each bar into a dictionary, then create a DataFrame from the list of dictionaries
+        # and create a CSV file
+        all_bars_data = [{
+                'date': bar.date,
+                'open': bar.open,
+                'high': bar.high,
+                'low': bar.low,
+                'close': bar.close,
+                'volume': bar.volume,
+            } for bar in all_bars]
+
+        df = pd.DataFrame(all_bars_data)
+        print(df.head())
+        df.to_csv(f'{start_date}_{end_date}_data.csv', index=False)
 
     except Exception as e:
         print(f"Error fetching {symbol}: {e}")
 
     end = time.perf_counter()
     print(f"Finished fetching {symbol} in {end - start:.2f} seconds\n")
-
-
-
-
-
-
-
 
 
 # Main function that connects once and launches all requests concurrently
