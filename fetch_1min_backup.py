@@ -8,30 +8,21 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pandas_market_calendars as mcal
 
+tz = ZoneInfo("America/New_York") #Convert to US timezone
 #======================BELOW IS Async VERSION, use command line to control========================
+
 # Fucntions that fetches data for a single symbol
 # symbol: str -> this is a hint that symbol should be a string only
 async def fetch_data(ib: IB, symbol: str):
+    print(f"== Requesting data for {symbol} ==")
 
-
-    tz = ZoneInfo("America/New_York") #Convert to US timezone
     start = time.perf_counter() 
-    start_date = datetime(2023, 1, 1, 9, 30, 0, tzinfo=tz)
-    # start_date = datetime(2016, 1, 5, 9, 30, 0, tzinfo=tz)
-    # end_date = datetime(2023, 2, 17, 18, 00, 0, tzinfo=tz)
-    end_date = datetime(2023, 1, 31, 18, 00, 0, tzinfo=tz)
 
-    # Get NYSE trading sessions (market open times)
-    # Set up NYSE calendar and get the schedule of trading days
-    nyse = mcal.get_calendar('NYSE')
-    schedule = nyse.schedule(start_date=start_date.date(), end_date=end_date.date())
-    # Convert schedule to your Amer/New York timezone
-    schedule['market_open'] = schedule['market_open'].dt.tz_convert(tz)
-    schedule['market_close'] = schedule['market_close'].dt.tz_convert(tz)
+    start_date = datetime(2016, 1, 5, 9, 30, 0, tzinfo=tz)
+    end_date = datetime(2016, 1, 10, 18, 00, 0, tzinfo=tz)
+    current_end = end_date
 
     all_bars = []
-    
-    
 
     try:
         contract = Stock(symbol, "SMART", "USD")
@@ -39,69 +30,61 @@ async def fetch_data(ib: IB, symbol: str):
         whatToShow = "TRADES"
         useRTH = True
         
-        MARKET_OPEN_HOUR = 9
-        MARKET_OPEN_MIN = 30
-        MARKET_CLOSE_HOUR = 18
-        MARKET_CLOSE_MIN = 0
-        window_days = 30
-        trading_opens = schedule['market_open']
-        num_trading_days = len(trading_opens)
+        window_days = 1
         
-        for chunk_end_idx in range(num_trading_days - 1, -1, -window_days):
-            # Figure out window start for this chunk
-            chunk_start_idx = max(0, chunk_end_idx - window_days + 1)
+        while current_end > start_date:
+            # Always request 1 D, but clamp to start_date if less than 1 day left
+            chunk_start = max(current_end - timedelta(days=window_days), start_date)
+            duration_str = f"{window_days} D"
+            endDateTime = current_end.strftime("%Y%m%d %H:%M:%S")
 
-            # Get the trading day datetimes for this chunk's boundaries
-            start_of_chunk_day = trading_opens.iloc[chunk_start_idx]
-            end_of_chunk_day = trading_opens.iloc[chunk_end_idx]
-
-            # Build the exact datetimes for the API call window
-            chunk_start_time = start_of_chunk_day.replace(
-                hour=MARKET_OPEN_HOUR, 
-                minute=MARKET_OPEN_MIN, 
-                second=0
-            )
-            chunk_end_time = end_of_chunk_day.replace(
-                hour=MARKET_CLOSE_HOUR, 
-                minute=MARKET_CLOSE_MIN, 
-                second=0
+            print(
+                f"\nRequesting chunk: {duration_str} ending at {endDateTime} "
+                f"(from {chunk_start} to {current_end})"
             )
 
-            # Clamp to user-requested global range
-            chunk_start_time = max(chunk_start_time, start_date)
-            chunk_end_time = min(chunk_end_time, end_date)
-
-            # Explain what we're fetching
-            print(f"Requesting {window_days} trading days: {chunk_start_time} to {chunk_end_time}")
-
-            # 3. Fetch data
-            api_t0 = time.perf_counter()
             bars = await ib.reqHistoricalDataAsync(
-                contract=contract,
-                endDateTime=chunk_end_time.strftime("%Y%m%d %H:%M:%S"),
-                durationStr=f"{window_days} D",
+                contract,
+                endDateTime=endDateTime,
+                durationStr=duration_str,
                 barSizeSetting=barSizeSetting,
                 whatToShow=whatToShow,
                 useRTH=useRTH
             )
-            api_t1 = time.perf_counter()
-            print(f"API call: {api_t1 - api_t0:.4f}s")
 
-            # 4. Only keep bars actually in this chunk window
-            filtered_bars = [bar for bar in bars if chunk_start_time <= bar.date < chunk_end_time]
+            # Filter bars to within the window you actually want
+            t0 = time.perf_counter()
+            filtered_bars = [
+                bar for bar in bars
+                if chunk_start <= bar.date < current_end
+            ]
+            print(f"Filtering took: {time.perf_counter() - t0:.6f} seconds")
+
             if not filtered_bars:
                 print("  No bars received for this chunk!")
             else:
-                all_bars = filtered_bars + all_bars  # Prepend for chronological order
+                print(f"Before: {len(all_bars)} bars")
+                all_bars = filtered_bars + all_bars #not using append coz need older data comes first
+                print(f"After: {len(all_bars)} bars")
+
+            current_end = chunk_start  # Move window back
 
         print(f"\n=== DONE! Total bars collected for {symbol}: {len(all_bars)} ===")
+        print("\nFirst 2 bars:")
+        for bar in all_bars[:2]:
+            print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
 
+        print("\nLast 2 bars:")
+        for bar in all_bars[-2:]:
+            print(f"{bar.date} O={bar.open:.2f} H={bar.high:.2f} L={bar.low:.2f} C={bar.close:.2f} V={int(bar.volume)}")
             
         # print(f"TYPE OF all_bars: {all_bars[1]}")
         """
         Output of 1 bar:
         TYPE OF all_bars: BarData(date=datetime.datetime(2025, 9, 2, 9, 31, tzinfo=zoneinfo.ZoneInfo(key='US/Eastern')), open=84.59, high=84.59, low=84.25, close=84.44, volume=894442.0, average=84.412, barCount=2976)
         """
+
+        
         # Put each bar into a dictionary, then create a DataFrame from the list of dictionaries
         # and create a CSV file
         # all_bars_data = [{
@@ -131,7 +114,7 @@ async def main(symbols):
     ib = IB()
     await ib.connectAsync("127.0.0.1", 7497, clientId=1)
 
-    # start = time.perf_counter()
+    start = time.perf_counter()
 
     # 1. Create a list of tasks (coroutines), but don't run them yet.
     # This is like setting up all the chess boards.
@@ -148,8 +131,8 @@ async def main(symbols):
     """
     await asyncio.gather(*tasks)
     
-    # end = time.perf_counter()
-    # print(f"Finished fetching {len(symbols)} symbols in {end - start:.2f} seconds")
+    end = time.perf_counter()
+    print(f"Finished fetching {len(symbols)} symbols in {end - start:.2f} seconds")
     
     ib.disconnect()
 
