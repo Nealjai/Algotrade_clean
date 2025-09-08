@@ -16,10 +16,10 @@ async def fetch_data(ib: IB, symbol: str):
 
     tz = ZoneInfo("America/New_York") #Convert to US timezone
     start = time.perf_counter() 
-    start_date = datetime(2023, 1, 1, 9, 30, 0, tzinfo=tz)
+    start_date = datetime(2021, 1, 1, 9, 30, 0, tzinfo=tz)
     # start_date = datetime(2016, 1, 5, 9, 30, 0, tzinfo=tz)
     # end_date = datetime(2023, 2, 17, 18, 00, 0, tzinfo=tz)
-    end_date = datetime(2023, 1, 31, 18, 00, 0, tzinfo=tz)
+    end_date = datetime(2022, 12, 31, 18, 00, 0, tzinfo=tz)
 
     # Get NYSE trading sessions (market open times)
     # Set up NYSE calendar and get the schedule of trading days
@@ -32,7 +32,6 @@ async def fetch_data(ib: IB, symbol: str):
     all_bars = []
     
     
-
     try:
         contract = Stock(symbol, "SMART", "USD")
         barSizeSetting = "1 min"
@@ -75,7 +74,7 @@ async def fetch_data(ib: IB, symbol: str):
             print(f"Requesting {window_days} trading days: {chunk_start_time} to {chunk_end_time}")
 
             # 3. Fetch data
-            api_t0 = time.perf_counter()
+
             bars = await ib.reqHistoricalDataAsync(
                 contract=contract,
                 endDateTime=chunk_end_time.strftime("%Y%m%d %H:%M:%S"),
@@ -84,8 +83,6 @@ async def fetch_data(ib: IB, symbol: str):
                 whatToShow=whatToShow,
                 useRTH=useRTH
             )
-            api_t1 = time.perf_counter()
-            print(f"API call: {api_t1 - api_t0:.4f}s")
 
             # 4. Only keep bars actually in this chunk window
             filtered_bars = [bar for bar in bars if chunk_start_time <= bar.date < chunk_end_time]
@@ -96,7 +93,7 @@ async def fetch_data(ib: IB, symbol: str):
 
         print(f"\n=== DONE! Total bars collected for {symbol}: {len(all_bars)} ===")
 
-            
+
         # print(f"TYPE OF all_bars: {all_bars[1]}")
         """
         Output of 1 bar:
@@ -104,18 +101,17 @@ async def fetch_data(ib: IB, symbol: str):
         """
         # Put each bar into a dictionary, then create a DataFrame from the list of dictionaries
         # and create a CSV file
-        # all_bars_data = [{
-        #         'date': bar.date,
-        #         'open': bar.open,
-        #         'high': bar.high,
-        #         'low': bar.low,
-        #         'close': bar.close,
-        #         'volume': bar.volume,
-        #     } for bar in all_bars]
+        df = pd.DataFrame(
+            [(bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume) for bar in all_bars],
+            columns=['date', 'open', 'high', 'low', 'close', 'volume']
+        )
 
         # df = pd.DataFrame(all_bars_data)
         # print(df.head())
-        # df.to_csv(f'{start_date}_{end_date}_data.csv', index=False)
+        safe_start = start_date.strftime('%Y%m%d')
+        safe_end = end_date.strftime('%Y%m%d')
+        filename = f'{safe_start}_{safe_end}_data.csv'
+        df.to_csv(filename, index=False)
 
     except Exception as e:
         print(f"Error fetching {symbol}: {e}")
@@ -129,6 +125,7 @@ async def fetch_data(ib: IB, symbol: str):
 async def main(symbols):
     #Creates and connects an IB API client (only once).
     ib = IB()
+    # await ib.connectAsync("127.0.0.1", 7496, clientId=1) #live
     await ib.connectAsync("127.0.0.1", 7497, clientId=1)
 
     # start = time.perf_counter()
@@ -168,7 +165,6 @@ if __name__ == "__main__":
     The user must provide at least one symbol (e.g., AAPL),
     But they can provide as many as they want (e.g., AAPL MSFT TSLA).
     help=... provides a description that will show up in the help message.
-    
     """
     p.add_argument("symbols", nargs="+", help="One or more ticker symbols, e.g. AAPL MSFT TSLA")
     
